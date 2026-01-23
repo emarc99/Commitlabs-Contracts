@@ -68,7 +68,7 @@ fn setup_test_env() -> (Env, Address, Address, Address) {
 
 #[test]
 fn test_initialize() {
-    let (e, admin, commitment_core, contract_id) = setup_test_env();
+    let (e, admin, _commitment_core, contract_id) = setup_test_env();
     
     // Verify initialization by checking that we can call other functions
     // (indirect verification through storage access)
