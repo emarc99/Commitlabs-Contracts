@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env, String};
-use commitment_core::{Commitment as CoreCommitment, CommitmentCoreContract, CommitmentRules as CoreCommitmentRules};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env, String, symbol_short};
+use commitment_core::{Commitment as CoreCommitment, CommitmentCoreContract, CommitmentRules as CoreCommitmentRules, DataKey};
 
 fn store_core_commitment(
     e: &Env,
@@ -36,8 +36,7 @@ fn store_core_commitment(
     };
 
     e.as_contract(commitment_core_id, || {
-        let key = (symbol_short!("Commit"), commitment_id);
-        e.storage().persistent().set(&key, &commitment);
+        e.storage().instance().set(&DataKey::Commitment(commitment_id), &commitment);
     });
 }
 
@@ -232,7 +231,8 @@ fn test_attest_and_get_metrics() {
 
 #[test]
 fn test_record_fees() {
-    let (e, _admin, commitment_core, contract_id) = setup_test_env();
+    let (e, admin, commitment_core, contract_id) = setup_test_env();
+    e.mock_all_auths();
     
     let commitment_id: u32 = 1;
     let owner = Address::generate(&e);
@@ -249,7 +249,7 @@ fn test_record_fees() {
     );
     
     e.as_contract(&contract_id, || {
-        AttestationEngineContract::record_fees(e.clone(), commitment_id, 100);
+        AttestationEngineContract::record_fees(e.clone(), admin.clone(), commitment_id, 100);
     });
     
     let metrics = e.as_contract(&contract_id, || {
@@ -261,7 +261,8 @@ fn test_record_fees() {
 
 #[test]
 fn test_record_multiple_fees() {
-    let (e, _admin, commitment_core, contract_id) = setup_test_env();
+    let (e, admin, commitment_core, contract_id) = setup_test_env();
+    e.mock_all_auths();
     
     let commitment_id: u32 = 1;
     let owner = Address::generate(&e);
@@ -277,10 +278,15 @@ fn test_record_multiple_fees() {
         1000,
     );
     
+    // Call each record_fees in separate contract context to avoid auth frame issues
     e.as_contract(&contract_id, || {
-        AttestationEngineContract::record_fees(e.clone(), commitment_id, 50);
-        AttestationEngineContract::record_fees(e.clone(), commitment_id, 30);
-        AttestationEngineContract::record_fees(e.clone(), commitment_id, 20);
+        AttestationEngineContract::record_fees(e.clone(), admin.clone(), commitment_id, 50);
+    });
+    e.as_contract(&contract_id, || {
+        AttestationEngineContract::record_fees(e.clone(), admin.clone(), commitment_id, 30);
+    });
+    e.as_contract(&contract_id, || {
+        AttestationEngineContract::record_fees(e.clone(), admin.clone(), commitment_id, 20);
     });
     
     let metrics = e.as_contract(&contract_id, || {

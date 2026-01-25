@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{symbol_short, testutils::{Address as _, Ledger}, Address, Env, String};
+use soroban_sdk::{testutils::{Address as _, Ledger}, token, Address, Env, String};
 
 // Helper function to create a test commitment
 fn create_test_commitment(
@@ -39,18 +39,18 @@ fn create_test_commitment(
 // Helper to store a commitment for testing
 fn store_commitment_test(e: &Env, contract_id: &Address, commitment: &Commitment) {
     e.as_contract(contract_id, || {
-        let key = (symbol_short!("Commit"), commitment.commitment_id);
-        e.storage().persistent().set(&key, commitment);
+        set_commitment(e, commitment);
     });
 }
 
 #[test]
 fn test_initialize() {
     let e = Env::default();
-    let admin = Address::generate(&e);
-    let nft_contract = Address::generate(&e);
     let contract_id = e.register_contract(None, CommitmentCoreContract);
     let client = CommitmentCoreContractClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
     
     client.initialize(&admin, &nft_contract);
 }
@@ -88,6 +88,96 @@ fn test_create_commitment() {
 }
 
 #[test]
+#[should_panic(expected = "Invalid duration")]
+fn test_validate_rules_invalid_duration() {
+    let e = Env::default();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+
+    let rules = CommitmentRules {
+        duration_days: 0, // Invalid duration
+        max_loss_percent: 10,
+        commitment_type: String::from_str(&e, "safe"),
+        early_exit_penalty: 5,
+        min_fee_threshold: 100,
+    };
+
+    // Test invalid duration - should panic
+    e.as_contract(&contract_id, || {
+        CommitmentCoreContract::validate_rules(&e, &rules);
+    });
+}
+
+#[test]
+#[should_panic(expected = "Invalid max loss percent")]
+fn test_validate_rules_invalid_max_loss() {
+    let e = Env::default();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+
+    let rules = CommitmentRules {
+        duration_days: 30,
+        max_loss_percent: 150, // Invalid max loss (> 100)
+        commitment_type: String::from_str(&e, "safe"),
+        early_exit_penalty: 5,
+        min_fee_threshold: 100,
+    };
+
+    // Test invalid max loss percent - should panic
+    e.as_contract(&contract_id, || {
+        CommitmentCoreContract::validate_rules(&e, &rules);
+    });
+}
+
+#[test]
+#[should_panic(expected = "Invalid commitment type")]
+fn test_validate_rules_invalid_type() {
+    let e = Env::default();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+
+    let rules = CommitmentRules {
+        duration_days: 30,
+        max_loss_percent: 10,
+        commitment_type: String::from_str(&e, "invalid_type"), // Invalid type
+        early_exit_penalty: 5,
+        min_fee_threshold: 100,
+    };
+
+    // Test invalid commitment type - should panic
+    e.as_contract(&contract_id, || {
+        CommitmentCoreContract::validate_rules(&e, &rules);
+    });
+}
+
+#[test]
+fn test_get_owner_commitments() {
+    let e = Env::default();
+    e.mock_all_auths();
+    
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+    
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+    
+    client.initialize(&admin, &nft_contract);
+    
+    let rules = CommitmentRules {
+        duration_days: 30,
+        max_loss_percent: 10,
+        commitment_type: String::from_str(&e, "balanced"),
+        early_exit_penalty: 5,
+        min_fee_threshold: 1000,
+    };
+    
+    let commitment_id = client.create_commitment(&owner, &1000, &asset_address, &rules);
+    
+    let commitments = client.get_owner_commitments(&owner);
+    assert_eq!(commitments.len(), 1);
+    assert_eq!(commitments.get(0).unwrap(), commitment_id);
+}
+
+#[test]
 fn test_settle() {
     let e = Env::default();
     e.mock_all_auths();
@@ -122,6 +212,70 @@ fn test_settle() {
     
     let settled = client.get_commitment(&commitment_id);
     assert_eq!(settled.status, String::from_str(&e, "settled"));
+}
+
+#[test]
+fn test_get_total_commitments() {
+    let e = Env::default();
+    e.mock_all_auths();
+    
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+    
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+    
+    client.initialize(&admin, &nft_contract);
+    
+    // Initially zero
+    let total = client.get_total_commitments();
+    assert_eq!(total, 0);
+    
+    let rules = CommitmentRules {
+        duration_days: 30,
+        max_loss_percent: 10,
+        commitment_type: String::from_str(&e, "balanced"),
+        early_exit_penalty: 5,
+        min_fee_threshold: 1000,
+    };
+    
+    let _commitment_id = client.create_commitment(&owner, &1000, &asset_address, &rules);
+    
+    // Should be 1 after creation
+    let total = client.get_total_commitments();
+    assert_eq!(total, 1);
+}
+
+#[test]
+fn test_get_admin() {
+    let e = Env::default();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+
+    client.initialize(&admin, &nft_contract);
+
+    let retrieved_admin = client.get_admin();
+    assert_eq!(retrieved_admin, admin);
+}
+
+#[test]
+fn test_get_nft_contract() {
+    let e = Env::default();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+
+    client.initialize(&admin, &nft_contract);
+
+    let retrieved_nft_contract = client.get_nft_contract();
+    assert_eq!(retrieved_nft_contract, nft_contract);
 }
 
 #[test]
