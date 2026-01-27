@@ -223,6 +223,14 @@
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                         }
+                      },
+                      {
+                        "key": {
+                          "symbol": "REENTRY"
+                        },
+                        "val": {
+                          "bool": false
+                        }
                       }
                     ]
                   }
