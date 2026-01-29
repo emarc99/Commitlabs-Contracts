@@ -516,7 +516,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000002"
               },
               {
-                "symbol": "settle"
+                "symbol": "mark_settled"
               }
             ],
             "data": {
@@ -539,7 +539,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "settle"
+                "symbol": "mark_settled"
               }
             ],
             "data": "void"
@@ -557,7 +557,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "CommitmentSettled"
+                "symbol": "Settled"
               }
             ],
             "data": {
