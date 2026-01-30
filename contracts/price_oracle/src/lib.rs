@@ -5,10 +5,9 @@
 //! Provides whitelisted price feeds with validation, time-based validity (staleness),
 //! and optional fallback. Used for value calculation, drawdown, compliance, and fees.
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env};
 use shared_utils::Validation;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
 };
 
 pub const CURRENT_VERSION: u32 = 1;

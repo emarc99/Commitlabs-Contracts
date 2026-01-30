@@ -4,8 +4,8 @@ use shared_utils::{
     emit_error_event, EmergencyControl, RateLimiter, SafeMath, TimeUtils, Validation,
 };
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, log, symbol_short, token, Address, Env,
-    IntoVal, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, log, symbol_short, token, Address, BytesN,
+    Env, IntoVal, String, Symbol, Vec,
 };
 
 pub const CURRENT_VERSION: u32 = 1;
@@ -120,6 +120,7 @@ pub enum DataKey {
     SupportedAssets,          // Vec<Address> — whitelist; empty = allow all
     AssetMetadata(Address),   // asset -> AssetMetadata (optional)
     TotalValueLockedByAsset(Address), // asset -> i128
+    Version,
 }
 
 /// Transfer assets from owner to contract
