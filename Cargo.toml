@@ -6,6 +6,7 @@ members = [
     "contracts/attestation_engine",
     "contracts/allocation_logic",
     "contracts/commitment_interface",
+    "contracts/commitment_transformation",
     "contracts/price_oracle",
     "contracts/mock_oracle",
     "tests/integration"]
