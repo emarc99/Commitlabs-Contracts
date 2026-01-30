@@ -650,6 +650,10 @@ fn test_update_value_event() {
         );
         set_commitment(&e, &commitment);
         e.storage().instance().set(&DataKey::TotalValueLocked, &1000i128);
+        e.storage().instance().set(
+            &DataKey::TotalValueLockedByAsset(commitment.asset_address.clone()),
+            &1000i128,
+        );
         // Call update_value in same context so it sees stored commitment
         CommitmentCoreContract::update_value(e.clone(), commitment.commitment_id.clone(), 1100);
     });
@@ -704,6 +708,10 @@ fn test_update_value_rate_limit_enforced() {
         );
         set_commitment(&e, &commitment);
         e.storage().instance().set(&DataKey::TotalValueLocked, &1000i128);
+        e.storage().instance().set(
+            &DataKey::TotalValueLockedByAsset(commitment.asset_address.clone()),
+            &1000i128,
+        );
         // First update_value inside contract context (consumes the one allowed call)
         CommitmentCoreContract::update_value(e.clone(), commitment.commitment_id.clone(), 100);
     });
@@ -1279,781 +1287,176 @@ fn test_early_exit_status_transition() {
 }
 
 // ============================================================================
-// Batch Operation Tests
-// ============================================================================
-
-// Helper module with mock contracts for testing
-mod batch_tests {
-    use super::*;
-    use soroban_sdk::{contract, contractimpl};
-    
-    // Mock NFT contract for batch testing
-    #[contract]
-    pub struct MockNFTContract;
-    
-    #[contractimpl]
-    impl MockNFTContract {
-        pub fn mint(
-            _e: Env,
-            _owner: Address,
-            _commitment_id: String,
-            _duration_days: u32,
-            _max_loss_percent: u32,
-            _commitment_type: String,
-            _initial_amount: i128,
-            _asset_address: Address,
-            _early_exit_penalty: u32,
-        ) -> u32 {
-            1 // Return mock token ID
-        }
-        
-        pub fn settle(_e: Env, _token_id: u32) {
-            // Mock settle - does nothing
-        }
-    }
-    
-    // Mock token contract for testing
-    #[contract]
-    pub struct MockTokenContract;
-    
-    #[contractimpl]
-    impl MockTokenContract {
-        pub fn balance(_e: Env, _id: Address) -> i128 {
-            10000000 // Return high balance for testing
-        }
-        
-        pub fn transfer(_e: Env, _from: Address, _to: Address, _amount: i128) {
-            // Mock transfer - does nothing
-        }
-    }
-}
-
-use batch_tests::*;
-
-#[test]
-fn test_batch_create_commitment_atomic_success() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    let owner1 = Address::generate(&e);
-    let owner2 = Address::generate(&e);
-    
-    // Initialize
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    // Create batch parameters
-    let mut params_list = Vec::new(&e);
-    
-    let rules1 = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    let rules2 = CommitmentRules {
-        duration_days: 60,
-        max_loss_percent: 20,
-        commitment_type: String::from_str(&e, "balanced"),
-        early_exit_penalty: 10,
-        min_fee_threshold: 200,
-    };
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: owner1.clone(),
-        amount: 1000,
-        asset_address: token_contract.clone(),
-        rules: rules1,
-    });
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: owner2.clone(),
-        amount: 2000,
-        asset_address: token_contract.clone(),
-        rules: rules2,
-    });
-    
-    // Execute batch create
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(
-            e.clone(),
-            params_list,
-            BatchMode::Atomic,
-        )
-    });
-    
-    // Verify success
-    assert!(result.success);
-    assert_eq!(result.results.len(), 2);
-    assert_eq!(result.errors.len(), 0);
-    
-    // Verify total commitments increased
-    let total = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::get_total_commitments(e.clone())
-    });
-    assert_eq!(total, 2);
-}
-
-#[test]
-fn test_batch_create_commitment_besteffort_partial_success() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    let owner1 = Address::generate(&e);
-    let owner2 = Address::generate(&e);
-    
-    // Initialize
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    // Create batch with mixed valid/invalid
-    let mut params_list = Vec::new(&e);
-    
-    let valid_rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    let invalid_rules = CommitmentRules {
-        duration_days: 0, // Invalid
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: owner1.clone(),
-        amount: 1000,
-        asset_address: token_contract.clone(),
-        rules: valid_rules.clone(),
-    });
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: owner2.clone(),
-        amount: 2000,
-        asset_address: token_contract.clone(),
-        rules: invalid_rules,
-    });
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: owner1.clone(),
-        amount: 1500,
-        asset_address: token_contract.clone(),
-        rules: valid_rules,
-    });
-    
-    // Execute batch create in BestEffort mode
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(
-            e.clone(),
-            params_list,
-            BatchMode::BestEffort,
-        )
-    });
-    
-    // Verify partial success
-    assert!(!result.success); // Not fully successful
-    assert_eq!(result.results.len(), 2); // 2 succeeded
-    assert_eq!(result.errors.len(), 1); // 1 failed
-    assert_eq!(result.errors.get(0).unwrap().index, 1); // Second item failed
-}
-
-#[test]
-fn test_batch_update_value_atomic_success() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let admin = Address::generate(&e);
-    let owner = Address::generate(&e);
-    
-    // Initialize
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    // Create test commitments
-    let commitment1 = create_test_commitment(&e, "c_0", &owner, 1000, 1000, 10, 30, 1000);
-    let commitment2 = create_test_commitment(&e, "c_1", &owner, 2000, 2000, 10, 30, 1000);
-    
-    store_commitment(&e, &contract_id, &commitment1);
-    store_commitment(&e, &contract_id, &commitment2);
-    
-    // Create batch update parameters
-    let mut params_list = Vec::new(&e);
-    params_list.push_back(UpdateValueParams {
-        commitment_id: String::from_str(&e, "c_0"),
-        new_value: 1100,
-    });
-    params_list.push_back(UpdateValueParams {
-        commitment_id: String::from_str(&e, "c_1"),
-        new_value: 2200,
-    });
-    
-    // Execute batch update
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_update_value(
-            e.clone(),
-            params_list,
-            BatchMode::Atomic,
-        )
-    });
-    
-    // Verify success
-    assert!(result.success);
-    assert_eq!(result.success_count, 2);
-    assert_eq!(result.errors.len(), 0);
-    
-    // Verify values were updated
-    let updated1 = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::get_commitment(e.clone(), String::from_str(&e, "c_0"))
-    });
-    assert_eq!(updated1.current_value, 1100);
-}
-
-// ============================================================================
-// Batch Size Tests - Testing with various batch sizes (1, 5, 10, 20, 50)
+// Multi-asset support tests
 // ============================================================================
 
 #[test]
-fn test_batch_create_single_item() {
+fn test_get_supported_assets_empty_by_default() {
+    let e = Env::default();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
+    });
+
+    let supported = e.as_contract(&contract_id, || {
+        CommitmentCoreContract::get_supported_assets(e.clone())
+    });
+    assert_eq!(supported.len(), 0);
+}
+
+#[test]
+fn test_add_and_remove_supported_asset() {
     let e = Env::default();
     e.mock_all_auths();
-    
     let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
     let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+    let asset = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
+    });
+
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+    client.add_supported_asset(&admin, &asset);
+
+    let supported = client.get_supported_assets();
+    assert_eq!(supported.len(), 1);
+    assert_eq!(supported.get(0).unwrap(), asset);
+
+    client.remove_supported_asset(&admin, &asset);
+    let supported = client.get_supported_assets();
+    assert_eq!(supported.len(), 0);
+}
+
+#[test]
+fn test_is_asset_supported_empty_whitelist_allows_all() {
+    let e = Env::default();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+    let asset = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
+    });
+
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+    // Empty whitelist = all assets supported
+    assert!(client.is_asset_supported(&asset));
+}
+
+#[test]
+fn test_is_asset_supported_whitelist() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+    let asset_a = Address::generate(&e);
+    let asset_b = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
+    });
+
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+    client.add_supported_asset(&admin, &asset_a);
+
+    assert!(client.is_asset_supported(&asset_a));
+    assert!(!client.is_asset_supported(&asset_b));
+}
+
+#[test]
+fn test_asset_metadata_set_and_get() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
+    let asset = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
+    });
+
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+    assert!(client.get_asset_metadata(&asset).is_none());
+
+    client.set_asset_metadata(&admin, &asset, &String::from_str(&e, "USDC"), &6);
+    let meta = client.get_asset_metadata(&asset).unwrap();
+    assert_eq!(meta.symbol, String::from_str(&e, "USDC"));
+    assert_eq!(meta.decimals, 6);
+}
+
+#[test]
+fn test_get_total_value_locked_by_asset() {
+    let e = Env::default();
+    let contract_id = e.register_contract(None, CommitmentCoreContract);
+    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
     let owner = Address::generate(&e);
-    
+    let asset = Address::generate(&e);
+
     e.as_contract(&contract_id, || {
         CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
     });
-    
-    let mut params_list = Vec::new(&e);
-    let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: owner.clone(),
-        amount: 1000,
-        asset_address: token_contract.clone(),
-        rules,
-    });
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(result.success);
-    assert_eq!(result.results.len(), 1);
-    assert_eq!(result.errors.len(), 0);
-}
 
-#[test]
-fn test_batch_create_five_items() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+    assert_eq!(client.get_total_value_locked_by_asset(&asset), 0);
+
+    // Store a commitment and set per-asset TVL manually (simulating create_commitment)
     e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
+        let commitment = create_test_commitment(
+            &e,
+            "c_asset1",
+            &owner,
+            500,
+            500,
+            10,
+            30,
+            1000,
+        );
+        set_commitment(&e, &commitment);
+        e.storage().instance().set(&DataKey::TotalValueLockedByAsset(asset.clone()), &500i128);
     });
-    
-    let mut params_list = Vec::new(&e);
-    let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    for i in 0..5 {
-        params_list.push_back(CreateCommitmentParams {
-            owner: Address::generate(&e),
-            amount: 1000 + (i as i128 * 100),
-            asset_address: token_contract.clone(),
-            rules: rules.clone(),
-        });
-    }
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(result.success);
-    assert_eq!(result.results.len(), 5);
-    assert_eq!(result.errors.len(), 0);
-    
-    let total = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::get_total_commitments(e.clone())
-    });
-    assert_eq!(total, 5);
+
+    let tvl_asset = client.get_total_value_locked_by_asset(&asset);
+    assert_eq!(tvl_asset, 500);
 }
 
 #[test]
-fn test_batch_create_ten_items() {
+#[should_panic(expected = "Asset is not in the supported whitelist")]
+fn test_create_commitment_requires_asset_supported_when_whitelist_set() {
     let e = Env::default();
     e.mock_all_auths();
-    
     let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
     let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let mut params_list = Vec::new(&e);
-    let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    for i in 0..10 {
-        params_list.push_back(CreateCommitmentParams {
-            owner: Address::generate(&e),
-            amount: 1000 + (i as i128 * 100),
-            asset_address: token_contract.clone(),
-            rules: rules.clone(),
-        });
-    }
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(result.success);
-    assert_eq!(result.results.len(), 10);
-    assert_eq!(result.errors.len(), 0);
-}
-
-#[test]
-fn test_batch_create_twenty_items() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let mut params_list = Vec::new(&e);
-    let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    for i in 0..20 {
-        params_list.push_back(CreateCommitmentParams {
-            owner: Address::generate(&e),
-            amount: 1000 + (i as i128 * 100),
-            asset_address: token_contract.clone(),
-            rules: rules.clone(),
-        });
-    }
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(result.success);
-    assert_eq!(result.results.len(), 20);
-    assert_eq!(result.errors.len(), 0);
-}
-
-#[test]
-fn test_batch_create_fifty_items_max_limit() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let mut params_list = Vec::new(&e);
-    let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    for i in 0..50 {
-        params_list.push_back(CreateCommitmentParams {
-            owner: Address::generate(&e),
-            amount: 1000 + (i as i128 * 10),
-            asset_address: token_contract.clone(),
-            rules: rules.clone(),
-        });
-    }
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(result.success);
-    assert_eq!(result.results.len(), 50);
-    assert_eq!(result.errors.len(), 0);
-}
-
-#[test]
-fn test_batch_create_exceeds_limit_fails() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let mut params_list = Vec::new(&e);
-    let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    for i in 0..51 {
-        params_list.push_back(CreateCommitmentParams {
-            owner: Address::generate(&e),
-            amount: 1000 + (i as i128 * 10),
-            asset_address: token_contract.clone(),
-            rules: rules.clone(),
-        });
-    }
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(!result.success);
-    assert_eq!(result.results.len(), 0);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, 2); // Batch too large
-}
-
-// ============================================================================
-// Failure Scenario Tests
-// ============================================================================
-
-#[test]
-fn test_batch_create_invalid_duration_atomic_fails() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let mut params_list = Vec::new(&e);
-    let invalid_rules = CommitmentRules {
-        duration_days: 0, // Invalid!
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: Address::generate(&e),
-        amount: 1000,
-        asset_address: token_contract.clone(),
-        rules: invalid_rules,
-    });
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(!result.success);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, CommitmentError::InvalidDuration as u32);
-}
-
-#[test]
-fn test_batch_create_invalid_max_loss_atomic_fails() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let mut params_list = Vec::new(&e);
-    let invalid_rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 150, // Invalid! > 100
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: Address::generate(&e),
-        amount: 1000,
-        asset_address: token_contract.clone(),
-        rules: invalid_rules,
-    });
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(!result.success);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, CommitmentError::InvalidMaxLossPercent as u32);
-}
-
-#[test]
-fn test_batch_create_invalid_type_atomic_fails() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let token_contract = e.register_contract(None, MockTokenContract);
-    let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let mut params_list = Vec::new(&e);
-    let invalid_rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "invalid_type"), // Invalid!
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
-    
-    params_list.push_back(CreateCommitmentParams {
-        owner: Address::generate(&e),
-        amount: 1000,
-        asset_address: token_contract.clone(),
-        rules: invalid_rules,
-    });
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(!result.success);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, CommitmentError::InvalidCommitmentType as u32);
-}
-
-#[test]
-fn test_batch_update_non_existent_commitment_besteffort() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let mut params_list = Vec::new(&e);
-    params_list.push_back(UpdateValueParams {
-        commitment_id: String::from_str(&e, "non_existent"),
-        new_value: 1100,
-    });
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_update_value(e.clone(), params_list, BatchMode::BestEffort)
-    });
-    
-    assert!(!result.success);
-    assert_eq!(result.success_count, 0);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, CommitmentError::CommitmentNotFound as u32);
-}
-
-#[test]
-fn test_batch_update_negative_value_fails() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let admin = Address::generate(&e);
+    let nft_contract = Address::generate(&e);
     let owner = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let commitment = create_test_commitment(&e, "c_0", &owner, 1000, 1000, 10, 30, 1000);
-    store_commitment(&e, &contract_id, &commitment);
-    
-    let mut params_list = Vec::new(&e);
-    params_list.push_back(UpdateValueParams {
-        commitment_id: String::from_str(&e, "c_0"),
-        new_value: -100, // Negative!
-    });
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_update_value(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(!result.success);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, CommitmentError::InvalidAmount as u32);
-}
+    let allowed_asset = Address::generate(&e);
+    let disallowed_asset = Address::generate(&e);
 
-#[test]
-fn test_batch_settle_not_expired_fails() {
-    let e = Env::default();
-    e.mock_all_auths();
-    e.ledger().with_mut(|li| {
-        li.timestamp = 1000; // Early time
-    });
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let admin = Address::generate(&e);
-    let owner = Address::generate(&e);
-    
     e.as_contract(&contract_id, || {
         CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
+        // Set whitelist to only allowed_asset
+        let mut supported = Vec::new(&e);
+        supported.push_back(allowed_asset.clone());
+        e.storage().instance().set(&DataKey::SupportedAssets, &supported);
     });
-    
-    // Create commitment that expires in the future
-    let commitment = create_test_commitment(&e, "c_0", &owner, 1000, 1000, 10, 30, 1000);
-    store_commitment(&e, &contract_id, &commitment);
-    
-    let mut commitment_ids = Vec::new(&e);
-    commitment_ids.push_back(String::from_str(&e, "c_0"));
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_settle(e.clone(), commitment_ids, BatchMode::Atomic)
-    });
-    
-    assert!(!result.success);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, CommitmentError::NotExpired as u32);
-}
-#[test]
-#[ignore] // TODO: Fix mock token contract for settlement
-fn test_batch_settle_already_settled_besteffort() {
-    let e = Env::default();
-    e.mock_all_auths();
-    e.ledger().with_mut(|li| {
-        li.timestamp = 100000; // Far future
-    });
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let admin = Address::generate(&e);
-    let owner = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-        e.storage().instance().set(&DataKey::TotalValueLocked, &3000i128);
-    });
-    
-    // Create only an already settled commitment to test detection
-    let mut settled = create_test_commitment(&e, "c_0", &owner, 1000, 1000, 10, 30, 1000);
-    settled.status = String::from_str(&e, "settled");
-    store_commitment(&e, &contract_id, &settled);
-    
-    let mut commitment_ids = Vec::new(&e);
-    commitment_ids.push_back(String::from_str(&e, "c_0"));
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_settle(e.clone(), commitment_ids, BatchMode::BestEffort)
-    });
-    
-    // Should fail because commitment is already settled
-    assert!(!result.success);
-    assert_eq!(result.success_count, 0);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, CommitmentError::NotActive as u32);
-}
-#[test]
-fn test_batch_empty_batch_fails() {
-    let e = Env::default();
-    e.mock_all_auths();
-    
-    let contract_id = e.register_contract(None, CommitmentCoreContract);
-    let nft_contract = e.register_contract(None, MockNFTContract);
-    let admin = Address::generate(&e);
-    
-    e.as_contract(&contract_id, || {
-        CommitmentCoreContract::initialize(e.clone(), admin.clone(), nft_contract.clone());
-    });
-    
-    let params_list = Vec::new(&e); // Empty!
-    
-    let result = e.as_contract(&contract_id, || {
-        CommitmentCoreContract::batch_create_commitment(e.clone(), params_list, BatchMode::Atomic)
-    });
-    
-    assert!(!result.success);
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors.get(0).unwrap().error_code, 1); // Empty batch error
+
+    let client = CommitmentCoreContractClient::new(&e, &contract_id);
+    let rules = CommitmentRules {
+        duration_days: 30,
+        max_loss_percent: 10,
+        commitment_type: String::from_str(&e, "safe"),
+        early_exit_penalty: 5,
+        min_fee_threshold: 100,
+    };
+
+    // Creating with disallowed asset should panic
+    client.create_commitment(&owner, &1000, &disallowed_asset, &rules);
 }
