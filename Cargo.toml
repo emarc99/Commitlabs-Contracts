@@ -1,10 +1,10 @@
 [workspace]
 members = [
     "contracts/shared_utils",
-    "contracts/commitment_nft",
+    # "contracts/commitment_nft",
     "contracts/commitment_marketplace",
     "contracts/commitment_core",
-    "contracts/attestation_engine",
+    # "contracts/attestation_engine",
     "contracts/allocation_logic",
     "contracts/commitment_interface",
     "contracts/commitment_transformation",

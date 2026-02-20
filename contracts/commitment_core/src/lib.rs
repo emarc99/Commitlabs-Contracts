@@ -215,11 +215,7 @@ fn require_authorized_updater(e: &Env, caller: &Address) {
         .get::<_, Vec<Address>>(&DataKey::AuthorizedUpdaters)
         .unwrap_or(Vec::new(e));
     if !updaters.contains(caller) {
-        fail(
-            e,
-            CommitmentError::NotAuthorizedUpdater,
-            "Unauthorized",
-        );
+        fail(e, CommitmentError::NotAuthorizedUpdater, "Unauthorized");
     }
 }
 
