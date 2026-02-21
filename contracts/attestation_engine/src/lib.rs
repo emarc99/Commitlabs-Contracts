@@ -1041,10 +1041,8 @@ fn is_authorized_verifier(e: &Env, address: &Address) -> bool {
             commitment_id.clone(),
             String::from_str(&e, "fee_generation"),
             data,
-            timestamp: e.ledger().timestamp(),
-            verified_by: caller.clone(),
-            is_compliant: true,
-        };
+            true,
+        )?;
 
         // Store attestation
         let atts_key = (symbol_short!("ATTS"), commitment_id.clone());
@@ -1119,32 +1117,14 @@ fn is_authorized_verifier(e: &Env, address: &Address) -> bool {
             Self::i128_to_string(&e, max_loss),
         );
 
-            // Store violation attestation
-            let atts_key = (symbol_short!("ATTS"), commitment_id.clone());
-            let mut attestations: Vec<Attestation> = e
-                .storage()
-                .persistent()
-                .get(&atts_key)
-                .unwrap_or_else(|| Vec::new(&e));
-            attestations.push_back(violation_attestation);
-            e.storage().persistent().set(&atts_key, &attestations);
-
-            // Emit ViolationDetected event
-            e.events().publish(
-                (Symbol::new(&e, "ViolationDetected"), commitment_id.clone()),
-                (drawdown_percent, max_loss_percent, e.ledger().timestamp()),
-            );
-        }
-        
         // Create drawdown attestation
-        let drawdown_data = Map::new(&e);
         let drawdown_attestation = Attestation {
             commitment_id: commitment_id.clone(),
             attestation_type: String::from_str(&e, "drawdown"),
-            data: drawdown_data,
+            data,
             timestamp: e.ledger().timestamp(),
             verified_by: caller.clone(),
-            is_compliant: !is_violation,
+            is_compliant,
         };
 
         // Store drawdown attestation
@@ -1156,19 +1136,7 @@ fn is_authorized_verifier(e: &Env, address: &Address) -> bool {
             .unwrap_or_else(|| Vec::new(&e));
         attestations.push_back(drawdown_attestation);
         e.storage().persistent().set(&atts_key, &attestations);
-        
-        // Recalculate compliance score (may call external contract)
-        metrics.compliance_score = Self::calculate_compliance_score(e.clone(), commitment_id.clone());
-        
-        // Update last attestation timestamp
-        metrics.last_attestation = e.ledger().timestamp();
-        
-        // Store updated health metrics
-        Self::store_health_metrics(&e, &metrics);
-        
-        // Clear reentrancy guard
-        e.storage().instance().set(&guard_key, &false);
-        
+
         // Emit DrawdownRecorded event
         e.events().publish(
             (Symbol::new(&e, "DrawdownRecorded"), commitment_id),

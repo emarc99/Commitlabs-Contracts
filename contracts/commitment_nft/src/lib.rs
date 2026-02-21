@@ -693,12 +693,13 @@ impl CommitmentNFTContract {
     // Settlement (Issue #5 - Main Implementation)
     // ========================================================================
 
-    /// Mark NFT as settled (after maturity)
+    /// Mark NFT as settled (after maturity).
+    /// Only the configured commitment_core contract or admin may call this; pass the caller address.
     ///
     /// # Reentrancy Protection
     /// Uses checks-effects-interactions pattern. This function only writes to storage
     /// and doesn't make external calls, but still protected for consistency.
-    pub fn settle(e: Env, token_id: u32) -> Result<(), ContractError> {
+    pub fn settle(e: Env, caller: Address, token_id: u32) -> Result<(), ContractError> {
         // Reentrancy protection
         let guard: bool = e
             .storage()
@@ -716,7 +717,7 @@ impl CommitmentNFTContract {
         Pausable::require_not_paused(&e);
 
         // Access control (Issue #108): only the authorized commitment_core contract or admin may call settle.
-        // Admin is allowed for emergency or operational settlement when core is unavailable.
+        // Caller must be passed and authorized; admin is allowed for emergency/operational use.
         let core_contract: Address = e
             .storage()
             .instance()
@@ -727,18 +728,18 @@ impl CommitmentNFTContract {
                     .set(&DataKey::ReentrancyGuard, &false);
                 ContractError::NotInitialized
             })?;
-        let invoker = e.invoker();
         let admin: Address = e
             .storage()
             .instance()
             .get(&DataKey::Admin)
             .ok_or(ContractError::NotInitialized)?;
-        if invoker != core_contract && invoker != admin {
+        if caller != core_contract && caller != admin {
             e.storage()
                 .instance()
                 .set(&DataKey::ReentrancyGuard, &false);
             return Err(ContractError::NotAuthorized);
         }
+        caller.require_auth();
 
         // CHECKS: Get the NFT
         let mut nft: CommitmentNFT = e

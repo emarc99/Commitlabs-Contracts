@@ -17,12 +17,13 @@ fn setup_contract(e: &Env) -> (Address, CommitmentNFTContractClient<'_>) {
 }
 
 /// Setup contract with a registered "core" contract so settle() can be called (access control).
-/// Returns (admin, client, core_contract_id). Use e.as_contract(&core_id, || { client.settle(&token_id) }) to settle.
+/// Returns (admin, client, core_contract_id). Use e.as_contract(&core_id, || { client.settle(&core_id, &token_id) }) to settle.
 fn setup_contract_with_core(e: &Env) -> (Address, CommitmentNFTContractClient<'_>, Address) {
+    e.mock_all_auths();
     let (admin, client) = setup_contract(e);
     client.initialize(&admin);
     let core_id = e.register_contract(None, CommitmentNFTContract);
-    client.set_core_contract(&core_id).unwrap();
+    let _ = client.set_core_contract(&core_id);
     (admin, client, core_id)
 }
 
@@ -441,7 +442,7 @@ fn test_total_supply_unchanged_after_transfer_and_settle() {
         li.timestamp = 172800;
     });
     e.as_contract(&core_id, || {
-        client.settle(&token_id).unwrap();
+        client.settle(&core_id, &token_id);
     });
     assert_eq!(client.total_supply(), 1);
     client.transfer(&owner1, &owner2, &token_id);
@@ -533,7 +534,7 @@ fn test_balance_of_decremented_after_transfer() {
         li.timestamp = 172800;
     });
     e.as_contract(&core_id, || {
-        client.settle(&token_id).unwrap();
+        client.settle(&core_id, &token_id);
     });
     client.transfer(&owner, &recipient, &token_id);
     assert_eq!(client.balance_of(&owner), 0);
@@ -702,7 +703,7 @@ fn test_transfer() {
         li.timestamp = 172800; // 2 days
     });
     e.as_contract(&core_id, || {
-        client.settle(&token_id);
+        client.settle(&core_id, &token_id);
     });
 
     // Verify NFT is now inactive (unlocked)
@@ -877,7 +878,7 @@ fn test_transfer_after_settlement() {
 
     // Settle the NFT (as core contract)
     e.as_contract(&core_id, || {
-        client.settle(&token_id);
+        client.settle(&core_id, &token_id);
     });
 
     // Verify NFT is now inactive (unlocked)
@@ -928,7 +929,7 @@ fn test_settle() {
 
     // Settle the NFT (as authorized core contract)
     e.as_contract(&core_id, || {
-        client.settle(&token_id);
+        client.settle(&core_id, &token_id);
     });
 
     // NFT should now be inactive
@@ -972,7 +973,7 @@ fn test_settle_not_expired() {
 
     // Try to settle before expiration (as core, should fail with NotExpired)
     e.as_contract(&core_id, || {
-        client.settle(&token_id);
+        client.settle(&core_id, &token_id);
     });
 }
 
@@ -1001,10 +1002,10 @@ fn test_settle_already_settled() {
     });
 
     e.as_contract(&core_id, || {
-        client.settle(&token_id);
+        client.settle(&core_id, &token_id);
     });
     e.as_contract(&core_id, || {
-        client.settle(&token_id); // Should fail
+        client.settle(&core_id, &token_id); // Should fail
     });
 }
 
@@ -1033,8 +1034,9 @@ fn test_settle_by_random_address_fails() {
     e.ledger().with_mut(|li| {
         li.timestamp = 172800;
     });
-    // Call settle without as_contract(core_id, ...) — invoker is not core, so NotAuthorized
-    client.settle(&token_id);
+    // Call settle with a random address (not core or admin) — expect NotAuthorized
+    let random_address = Address::generate(&e);
+    client.settle(&random_address, &token_id);
 }
 
 #[test]
@@ -1058,7 +1060,7 @@ fn test_settle_by_core_contract_succeeds() {
         li.timestamp = 172800;
     });
     e.as_contract(&core_id, || {
-        client.settle(&token_id).unwrap();
+        client.settle(&core_id, &token_id);
     });
     assert_eq!(client.is_active(&token_id), false);
 }
@@ -1258,9 +1260,9 @@ fn test_balance_updates_after_transfer() {
         li.timestamp = 172800; // 2 days
     });
     e.as_contract(&core_id, || {
-        client.settle(&0);
-        client.settle(&1);
-        client.settle(&2);
+        client.settle(&core_id, &0);
+        client.settle(&core_id, &1);
+        client.settle(&core_id, &2);
     });
 
     // Transfer one NFT
@@ -1341,23 +1343,27 @@ fn test_unpause_restores_transfer() {
     let e = Env::default();
     e.mock_all_auths();
 
-    let (admin, client) = setup_contract(&e);
+    let (_admin, client, core_id) = setup_contract_with_core(&e);
     let owner1 = Address::generate(&e);
     let owner2 = Address::generate(&e);
     let asset_address = Address::generate(&e);
 
-    client.initialize(&admin);
-
     let token_id = client.mint(
         &owner1,
         &String::from_str(&e, "commitment_002"),
-        &30,
+        &1, // 1 day so we can settle
         &10,
         &String::from_str(&e, "balanced"),
         &1000,
         &asset_address,
         &5,
     );
+    e.ledger().with_mut(|li| {
+        li.timestamp = 172800;
+    });
+    e.as_contract(&core_id, || {
+        client.settle(&core_id, &token_id);
+    });
 
     client.pause();
     client.unpause();
