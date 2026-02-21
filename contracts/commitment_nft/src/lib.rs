@@ -1,6 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec, Symbol};
-use shared_utils::Pausable;
+use soroban_sdk::{contract, BytesN, contractimpl, contracttype, contracterror, symbol_short, Address, Env, String, Vec, Symbol};
+use shared_utils::{Pausable, EmergencyControl};
+
 
 // ============================================================================
 // Error Types
@@ -119,6 +120,8 @@ pub enum DataKey {
 // Events
 // const MINT: soroban_sdk::Symbol = symbol_short!("mint"); // TODO: Use this in mint function
 
+pub const CURRENT_VERSION: u32 = 1;
+
 #[cfg(test)]
 mod tests;
 
@@ -149,7 +152,7 @@ impl CommitmentNFTContract {
         e.storage().instance().set(&DataKey::TokenIds, &token_ids);
 
         // Initialize paused state (default: not paused)
-        e.storage().instance().set(&Pausable::PAUSED_KEY, &false);
+        e.storage().instance().set(&Pausable::paused_key(&e), &false);
 
         Ok(())
     }

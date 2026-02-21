@@ -8,7 +8,11 @@ pub struct Pausable;
 
 impl Pausable {
     /// Storage key for the paused state
-    pub const PAUSED_KEY: Symbol = Symbol::new("paused");
+    // pub const PAUSED_KEY: Symbol = Symbol::new("paused");
+
+    pub fn paused_key(env: &Env) -> Symbol {
+        Symbol::new(env, "paused")
+    }
 
     /// Check if the contract is currently paused
     /// 
@@ -20,7 +24,7 @@ impl Pausable {
     pub fn is_paused(e: &Env) -> bool {
         e.storage()
             .instance()
-            .get::<_, bool>(&Self::PAUSED_KEY)
+            .get::<_, bool>(&Self::paused_key(e))
             .unwrap_or(false)
     }
 
@@ -39,7 +43,7 @@ impl Pausable {
         // Set paused state
         e.storage()
             .instance()
-            .set(&Self::PAUSED_KEY, &true);
+            .set(&Self::paused_key(e), &true);
 
         // Emit pause event
         Events::emit(e, Symbol::new(e, "Pause"), ());
@@ -60,7 +64,7 @@ impl Pausable {
         // Clear paused state
         e.storage()
             .instance()
-            .set(&Self::PAUSED_KEY, &false);
+            .set(&Self::paused_key(e), &false);
 
         // Emit unpause event
         Events::emit(e, Symbol::new(e, "Unpause"), ());
