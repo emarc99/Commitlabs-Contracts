@@ -570,8 +570,8 @@ impl AttestationEngineContract {
                 core::cmp::min(100, metrics.compliance_score.saturating_add(1));
         }
 
-        // Store updated metrics
-        e.storage().persistent().set(&key, &metrics);
+        // Store updated metrics (use helper for clarity)
+        Self::store_health_metrics(e, &metrics);
     }
 
     /// Parse i128 from String (optimized implementation)
@@ -847,7 +847,8 @@ impl AttestationEngineContract {
 
         // Sum fees from fee attestations
         // Extract fee_amount from data map where key is "fee_amount"
-        let fees_generated: i128 = 0;
+        // (placeholder variables since detailed tracking not yet implemented)
+        let _fees_generated: i128 = 0;
         let fee_key = String::from_str(&e, "fee_amount");
         for att in attestations.iter() {
             if att.attestation_type == String::from_str(&e, "fee_generation") {
@@ -869,11 +870,11 @@ impl AttestationEngineContract {
 
         // Calculate volatility exposure from attestations
         // Simplified: use variance of price changes from attestations
-        let mut volatility_exposure: i128 = 0;
+        let mut _volatility_exposure: i128 = 0;
         if attestations.len() > 1 {
             // Calculate variance from price data in attestations
             // For now, return 0 as placeholder - would need price history
-            volatility_exposure = 0;
+            _volatility_exposure = 0;
         }
 
         // Get last attestation timestamp
@@ -1057,15 +1058,15 @@ impl AttestationEngineContract {
             is_compliant,
         };
 
-        // Store drawdown attestation
-        let atts_key = (symbol_short!("ATTS"), commitment_id.clone());
+        // Store drawdown attestation using the same key type as regular attest()
+        let key = DataKey::Attestations(commitment_id.clone());
         let mut attestations: Vec<Attestation> = e
             .storage()
             .persistent()
-            .get(&atts_key)
+            .get(&key)
             .unwrap_or_else(|| Vec::new(&e));
         attestations.push_back(drawdown_attestation);
-        e.storage().persistent().set(&atts_key, &attestations);
+        e.storage().persistent().set(&key, &attestations);
 
         // Emit DrawdownRecorded event
         e.events().publish(
