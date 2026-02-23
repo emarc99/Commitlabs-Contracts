@@ -5,7 +5,6 @@ use soroban_sdk::{
     String, Symbol, Vec,
 };
 
-/// Current storage/contract version for migrations
 const CURRENT_VERSION: u32 = 1;
 
 // ============================================================================
