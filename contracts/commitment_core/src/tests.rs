@@ -203,6 +203,7 @@ fn test_create_commitment_duration_zero() {
         commitment_type: String::from_str(&e, "safe"),
         early_exit_penalty: 5,
         min_fee_threshold: 100,
+        grace_period_days: 0,
     };
 
     e.as_contract(&contract_id, || {
@@ -232,6 +233,7 @@ fn test_create_commitment_max_loss_over_100() {
         commitment_type: String::from_str(&e, "safe"),
         early_exit_penalty: 5,
         min_fee_threshold: 100,
+        grace_period_days: 0,
     };
 
     e.as_contract(&contract_id, || {
@@ -256,12 +258,13 @@ fn test_create_commitment_amount_zero() {
     });
 
     let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
+            duration_days: 30,
+            max_loss_percent: 10,
+            commitment_type: String::from_str(&e, "safe"),
+            early_exit_penalty: 5,
+            min_fee_threshold: 100,
+            grace_period_days: 0,
+        };
 
     e.as_contract(&contract_id, || {
         CommitmentCoreContract::create_commitment(e.clone(), owner, 0, asset_address, rules); // Invalid amount
@@ -285,12 +288,13 @@ fn test_create_commitment_amount_negative() {
     });
 
     let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
+            duration_days: 30,
+            max_loss_percent: 10,
+            commitment_type: String::from_str(&e, "safe"),
+            early_exit_penalty: 5,
+            min_fee_threshold: 100,
+            grace_period_days: 0,
+        };
 
     e.as_contract(&contract_id, || {
         CommitmentCoreContract::create_commitment(e.clone(), owner, -100, asset_address, rules); // Invalid amount
@@ -319,6 +323,7 @@ fn test_create_commitment_invalid_type() {
         commitment_type: String::from_str(&e, "invalid"), // Invalid type
         early_exit_penalty: 5,
         min_fee_threshold: 100,
+        grace_period_days: 0,
     };
 
     e.as_contract(&contract_id, || {
@@ -342,12 +347,13 @@ fn test_create_commitment_valid_rules() {
     });
 
     let rules = CommitmentRules {
-        duration_days: 30,
-        max_loss_percent: 10,
-        commitment_type: String::from_str(&e, "safe"),
-        early_exit_penalty: 5,
-        min_fee_threshold: 100,
-    };
+            duration_days: 30,
+            max_loss_percent: 10,
+            commitment_type: String::from_str(&e, "safe"),
+            early_exit_penalty: 5,
+            min_fee_threshold: 100,
+            grace_period_days: 0,
+        };
 
     // This will fail at NFT minting since we don't have a real NFT contract,
     // but it validates that the rules validation passes
