@@ -15,7 +15,7 @@ use soroban_sdk::{
 use commitment_core::{CommitmentCoreContract, CommitmentRules};
 use commitment_nft::CommitmentNFTContract;
 use attestation_engine::{AttestationEngineContract, AttestationError};
-// use allocation_logic::{AllocationStrategiesContract, RiskLevel, Strategy};
+use allocation_logic::{AllocationStrategiesContract, RiskLevel, Strategy};
 
 /// Test: Commitment Core calls NFT Contract during creation
 #[test]

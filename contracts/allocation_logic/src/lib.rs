@@ -53,7 +53,7 @@ pub enum RiskLevel {
 }
 
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Pool {
     pub pool_id: u32,
     pub risk_level: RiskLevel,
@@ -66,7 +66,7 @@ pub struct Pool {
 }
 
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Allocation {
     pub commitment_id: u64,
     pub pool_id: u32,
@@ -75,7 +75,7 @@ pub struct Allocation {
 }
 
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AllocationSummary {
     pub commitment_id: u64,
     pub strategy: Strategy,
