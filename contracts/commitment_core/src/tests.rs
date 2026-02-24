@@ -180,7 +180,6 @@ fn test_create_commitment_duration_zero() {
         commitment_type: String::from_str(&e, "safe"),
         early_exit_penalty: 5,
         min_fee_threshold: 100,
-        grace_period_days: 0,
     };
 
     e.as_contract(&contract_id, || {
@@ -210,7 +209,6 @@ fn test_create_commitment_max_loss_over_100() {
         commitment_type: String::from_str(&e, "safe"),
         early_exit_penalty: 5,
         min_fee_threshold: 100,
-        grace_period_days: 0,
     };
 
     e.as_contract(&contract_id, || {
@@ -240,7 +238,6 @@ fn test_create_commitment_amount_zero() {
             commitment_type: String::from_str(&e, "safe"),
             early_exit_penalty: 5,
             min_fee_threshold: 100,
-            grace_period_days: 0,
         };
 
     e.as_contract(&contract_id, || {
@@ -270,7 +267,6 @@ fn test_create_commitment_amount_negative() {
             commitment_type: String::from_str(&e, "safe"),
             early_exit_penalty: 5,
             min_fee_threshold: 100,
-            grace_period_days: 0,
         };
 
     e.as_contract(&contract_id, || {
@@ -300,7 +296,6 @@ fn test_create_commitment_invalid_type() {
         commitment_type: String::from_str(&e, "invalid"), // Invalid type
         early_exit_penalty: 5,
         min_fee_threshold: 100,
-        grace_period_days: 0,
     };
 
     e.as_contract(&contract_id, || {
@@ -329,7 +324,6 @@ fn test_create_commitment_valid_rules() {
             commitment_type: String::from_str(&e, "safe"),
             early_exit_penalty: 5,
             min_fee_threshold: 100,
-            grace_period_days: 0,
         };
 
     // This will fail at NFT minting since we don't have a real NFT contract,
