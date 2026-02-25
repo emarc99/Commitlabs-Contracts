@@ -558,8 +558,13 @@ impl CommitmentNFTContract {
             return Err(ContractError::NotOwner);
         }
 
-        // Note: Active commitments CAN be transferred (secondary market)
-        // The commitment_core contract maintains the commitment state separately
+        // Active (locked) commitment NFTs cannot be transferred (#145)
+        if nft.is_active {
+            e.storage()
+                .instance()
+                .set(&DataKey::ReentrancyGuard, &false);
+            return Err(ContractError::NFTLocked);
+        }
 
         // EFFECTS: Update state
         // Update owner

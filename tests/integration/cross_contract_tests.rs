@@ -13,8 +13,8 @@ use soroban_sdk::{
 };
 
 use commitment_core::{CommitmentCoreContract, CommitmentRules};
-use commitment_nft::CommitmentNFTContract;
-use attestation_engine::{AttestationEngineContract, AttestationError, AttestationsPage};
+use commitment_nft::{CommitmentNFTContract, ContractError as NftContractError};
+use attestation_engine::{AttestationEngineContract, AttestationError};
 use allocation_logic::{AllocationStrategiesContract, RiskLevel, Strategy};
 
 /// Verify compliance integration between commitment_core and attestation_engine.
@@ -759,6 +759,16 @@ fn test_commitment_settlement_calls_nft_settle() {
         });
     assert!(!is_active_after);
 
+    // Verify get_metadata still returns data but is_active is false (#133)
+    let nft_after_settle = harness
+        .env
+        .as_contract(&harness.contracts.commitment_nft, || {
+            CommitmentNFTContract::get_metadata(harness.env.clone(), 0).unwrap()
+        });
+    assert!(!nft_after_settle.is_active);
+    assert_eq!(nft_after_settle.metadata.commitment_id, commitment_id);
+    assert_eq!(nft_after_settle.owner, *user);
+
     // Verify commitment status
     let commitment = harness
         .env
@@ -1086,4 +1096,280 @@ fn test_pool_management_cross_contract() {
             AllocationStrategiesContract::get_pool(harness.env.clone(), 10).unwrap()
         });
     assert!(!updated_pool.active);
+}
+
+// =============================================================================
+// #143: get_commitments_created_between
+// =============================================================================
+
+/// Test: get_commitments_created_between returns commitments in time range
+#[test]
+fn test_get_commitments_created_between() {
+    let harness = TestHarness::new();
+    let user = &harness.accounts.user1;
+    let amount = 1_000_000_000_000i128;
+
+    harness.approve_tokens(user, &harness.contracts.commitment_core, amount * 3);
+
+    let t0 = harness.current_timestamp();
+
+    let id1 = harness.create_commitment(user, amount, &harness.contracts.token, harness.default_rules());
+    harness.advance_time(100);
+    let t_after_first = harness.current_timestamp();
+    let id2 = harness.create_commitment(user, amount, &harness.contracts.token, harness.default_rules());
+    harness.advance_time(100);
+    let id3 = harness.create_commitment(user, amount, &harness.contracts.token, harness.default_rules());
+
+    // Range [t0, t_after_first - 1]: only id1 (id2 created at t_after_first)
+    let ids_early = harness
+        .env
+        .as_contract(&harness.contracts.commitment_core, || {
+            CommitmentCoreContract::get_commitments_created_between(
+                harness.env.clone(),
+                t0,
+                t_after_first.saturating_sub(1),
+            )
+        });
+    assert_eq!(ids_early.len(), 1);
+    assert!(ids_early.contains(&id1));
+
+    // Range [t0, t_after_first]: id1 and id2
+    let ids_two = harness
+        .env
+        .as_contract(&harness.contracts.commitment_core, || {
+            CommitmentCoreContract::get_commitments_created_between(
+                harness.env.clone(),
+                t0,
+                t_after_first,
+            )
+        });
+    assert_eq!(ids_two.len(), 2);
+    assert!(ids_two.contains(&id1));
+    assert!(ids_two.contains(&id2));
+
+    // Empty range
+    let empty = harness
+        .env
+        .as_contract(&harness.contracts.commitment_core, || {
+            CommitmentCoreContract::get_commitments_created_between(
+                harness.env.clone(),
+                t0.saturating_sub(10000),
+                t0.saturating_sub(5000),
+            )
+        });
+    assert!(empty.is_empty());
+}
+
+// =============================================================================
+// #145: NFT transfer when commitment is active (locked)
+// =============================================================================
+
+/// Test: Transfer of active (locked) NFT fails; after settle transfer succeeds
+#[test]
+fn test_nft_transfer_locked_until_settled() {
+    let harness = TestHarness::new();
+    let user = &harness.accounts.user1;
+    let other = &harness.accounts.user2;
+    let amount = 1_000_000_000_000i128;
+
+    harness.approve_tokens(user, &harness.contracts.commitment_core, amount);
+
+    let commitment_id = harness.create_commitment(
+        user,
+        amount,
+        &harness.contracts.token,
+        harness.default_rules(),
+    );
+    let nft_token_id = 0u32;
+
+    // Mint NFT; do not settle -> is_active == true
+    let is_active = harness
+        .env
+        .as_contract(&harness.contracts.commitment_nft, || {
+            CommitmentNFTContract::is_active(harness.env.clone(), nft_token_id).unwrap()
+        });
+    assert!(is_active);
+
+    // transfer(from, to, token_id) while active -> error
+    let transfer_result = harness
+        .env
+        .as_contract(&harness.contracts.commitment_nft, || {
+            CommitmentNFTContract::transfer(
+                harness.env.clone(),
+                user.clone(),
+                other.clone(),
+                nft_token_id,
+            )
+        });
+    assert_eq!(transfer_result, Err(NftContractError::NFTLocked));
+
+    // Settle commitment (advance time and settle)
+    harness.advance_days(31);
+    harness
+        .env
+        .as_contract(&harness.contracts.commitment_core, || {
+            CommitmentCoreContract::settle(harness.env.clone(), commitment_id.clone())
+        });
+
+    // After settled, NFT is inactive
+    let is_active_after = harness
+        .env
+        .as_contract(&harness.contracts.commitment_nft, || {
+            CommitmentNFTContract::is_active(harness.env.clone(), nft_token_id).unwrap()
+        });
+    assert!(!is_active_after);
+
+    // transfer(from, to, token_id) after settled -> success
+    harness
+        .env
+        .as_contract(&harness.contracts.commitment_nft, || {
+            CommitmentNFTContract::transfer(
+                harness.env.clone(),
+                user.clone(),
+                other.clone(),
+                nft_token_id,
+            )
+            .unwrap();
+        });
+
+    let new_owner = harness
+        .env
+        .as_contract(&harness.contracts.commitment_nft, || {
+            CommitmentNFTContract::owner_of(harness.env.clone(), nft_token_id).unwrap()
+        });
+    assert_eq!(new_owner, *other);
+}
+
+// =============================================================================
+// #148: early_exit when current_value is zero
+// =============================================================================
+
+/// Test: early_exit with current_value = 0 completes without panic; penalty = 0, returned = 0
+#[test]
+fn test_early_exit_zero_current_value() {
+    let harness = TestHarness::new();
+    let user = &harness.accounts.user1;
+    let amount = 1_000_000_000_000i128;
+
+    harness.approve_tokens(user, &harness.contracts.commitment_core, amount);
+
+    // Use max_loss_percent: 100 so update_value(0) does not mark as violated
+    let rules = CommitmentRules {
+        duration_days: 30,
+        max_loss_percent: 100,
+        commitment_type: String::from_str(&harness.env, "balanced"),
+        early_exit_penalty: 5,
+        min_fee_threshold: 1000,
+        grace_period_days: 0,
+    };
+    let commitment_id = harness.create_commitment(
+        user,
+        amount,
+        &harness.contracts.token,
+        rules,
+    );
+
+    // update_value(commitment_id, 0)
+    harness
+        .env
+        .as_contract(&harness.contracts.commitment_core, || {
+            CommitmentCoreContract::update_value(
+                harness.env.clone(),
+                commitment_id.clone(),
+                0,
+            )
+        });
+
+    // early_exit(commitment_id) by owner -> no panic; penalty = 0, returned = 0
+    harness
+        .env
+        .as_contract(&harness.contracts.commitment_core, || {
+            CommitmentCoreContract::early_exit(
+                harness.env.clone(),
+                commitment_id.clone(),
+                user.clone(),
+            )
+        });
+
+    let commitment = harness
+        .env
+        .as_contract(&harness.contracts.commitment_core, || {
+            CommitmentCoreContract::get_commitment(harness.env.clone(), commitment_id.clone())
+        });
+    assert_eq!(commitment.status, String::from_str(&harness.env, "early_exit"));
+    assert_eq!(commitment.current_value, 0);
+}
+
+// =============================================================================
+// #149: record_fees and record_drawdown access control
+// =============================================================================
+
+/// Test: record_fees and record_drawdown by random address -> error; by verifier -> success
+#[test]
+fn test_record_fees_record_drawdown_access_control() {
+    let harness = TestHarness::new();
+    let user = &harness.accounts.user1;
+    let verifier = &harness.accounts.verifier;
+    let random = &harness.accounts.attacker;
+    let amount = 1_000_000_000_000i128;
+
+    harness.approve_tokens(user, &harness.contracts.commitment_core, amount);
+    let commitment_id = harness.create_commitment(
+        user,
+        amount,
+        &harness.contracts.token,
+        harness.default_rules(),
+    );
+
+    // record_fees(commitment_id, amount) by random address -> error
+    let r_fees_random = harness
+        .env
+        .as_contract(&harness.contracts.attestation_engine, || {
+            AttestationEngineContract::record_fees(
+                harness.env.clone(),
+                random.clone(),
+                commitment_id.clone(),
+                50_000,
+            )
+        });
+    assert_eq!(r_fees_random, Err(AttestationError::Unauthorized));
+
+    // record_drawdown(commitment_id, percent) by random address -> error
+    let r_drawdown_random = harness
+        .env
+        .as_contract(&harness.contracts.attestation_engine, || {
+            AttestationEngineContract::record_drawdown(
+                harness.env.clone(),
+                random.clone(),
+                commitment_id.clone(),
+                5,
+            )
+        });
+    assert_eq!(r_drawdown_random, Err(AttestationError::Unauthorized));
+
+    // record_fees by authorized verifier -> success
+    harness
+        .env
+        .as_contract(&harness.contracts.attestation_engine, || {
+            AttestationEngineContract::record_fees(
+                harness.env.clone(),
+                verifier.clone(),
+                commitment_id.clone(),
+                50_000,
+            )
+            .unwrap();
+        });
+
+    // record_drawdown by authorized verifier -> success
+    harness
+        .env
+        .as_contract(&harness.contracts.attestation_engine, || {
+            AttestationEngineContract::record_drawdown(
+                harness.env.clone(),
+                verifier.clone(),
+                commitment_id.clone(),
+                5,
+            )
+            .unwrap();
+        });
 }
