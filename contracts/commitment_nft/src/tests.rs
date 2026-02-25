@@ -310,6 +310,230 @@ fn test_mint_wrong_case_commitment_type() {
     );
 }
 
+/// Issue #139: Test that all three valid commitment types are accepted
+#[test]
+fn test_mint_valid_commitment_types_all_three() {
+    let e = Env::default();
+    let (admin, client) = setup_contract(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    client.initialize(&admin);
+
+    // Test "safe"
+    let token_id_safe = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_safe"),
+        &30,
+        &10,
+        &String::from_str(&e, "safe"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+    assert_eq!(token_id_safe, 0);
+
+    // Test "balanced"
+    let token_id_balanced = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_balanced"),
+        &30,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+    assert_eq!(token_id_balanced, 1);
+
+    // Test "aggressive"
+    let token_id_aggressive = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_aggressive"),
+        &30,
+        &10,
+        &String::from_str(&e, "aggressive"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+    assert_eq!(token_id_aggressive, 2);
+
+    // Verify all were minted successfully
+    assert_eq!(client.total_supply(), 3);
+    assert_eq!(
+        client.get_metadata(&token_id_safe).metadata.commitment_type,
+        String::from_str(&e, "safe")
+    );
+    assert_eq!(
+        client.get_metadata(&token_id_balanced).metadata.commitment_type,
+        String::from_str(&e, "balanced")
+    );
+    assert_eq!(
+        client.get_metadata(&token_id_aggressive).metadata.commitment_type,
+        String::from_str(&e, "aggressive")
+    );
+}
+
+// ============================================
+// Issue #139: String Parameter Edge Cases - commitment_id
+// ============================================
+
+/// Test that empty commitment_id is handled appropriately
+/// Observes whether empty commitment_id is currently accepted or rejected
+#[test]
+#[should_panic(expected = "Error(Contract, #21)")] // InvalidCommitmentId
+fn test_mint_empty_commitment_id() {
+    let e = Env::default();
+    let (admin, client) = setup_contract(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    client.initialize(&admin);
+
+    // Try to mint with empty commitment_id
+    client.mint(
+        &owner,
+        &String::from_str(&e, ""), // Empty commitment_id
+        &30,
+        &10,
+        &String::from_str(&e, "safe"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+}
+
+/// Test that very long commitment_id (1,000+ chars) is properly rejected
+/// It should exceed MAX_COMMITMENT_ID_LENGTH (256) and be rejected with InvalidCommitmentId error
+#[test]
+#[should_panic(expected = "Error(Contract, #21)")] // InvalidCommitmentId - exceeds MAX_COMMITMENT_ID_LENGTH
+fn test_mint_commitment_id_very_long() {
+    let e = Env::default();
+    let (admin, client) = setup_contract(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    client.initialize(&admin);
+
+    // Create a very long commitment_id: 1000+ chars (exceeds MAX_COMMITMENT_ID_LENGTH of 256)
+    let very_long_id = "a".repeat(1000);
+    let long_id = String::from_str(&e, &very_long_id);
+
+    // Attempt to mint with very long commitment_id
+    // Should fail with InvalidCommitmentId since it exceeds the max length
+    client.mint(
+        &owner,
+        &long_id,
+        &30,
+        &10,
+        &String::from_str(&e, "safe"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+}
+
+/// Test that commitment_id at the maximum allowed length (256 chars) is accepted
+#[test]
+fn test_mint_commitment_id_max_allowed_length() {
+    let e = Env::default();
+    let (admin, client) = setup_contract(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    client.initialize(&admin);
+
+    // Create a commitment_id at exactly MAX_COMMITMENT_ID_LENGTH (256 chars)
+    let max_length_id = "x".repeat(256);
+    let commitment_id = String::from_str(&e, &max_length_id);
+
+    // Should succeed since it's within the max length
+    let token_id = client.mint(
+        &owner,
+        &commitment_id,
+        &30,
+        &10,
+        &String::from_str(&e, "safe"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+
+    // Verify the commitment_id was stored correctly
+    let metadata = client.get_metadata(&token_id);
+    assert_eq!(metadata.metadata.commitment_id, commitment_id);
+}
+
+/// Test that normal length commitment_id works correctly
+#[test]
+fn test_mint_commitment_id_normal_length() {
+    let e = Env::default();
+    let (admin, client) = setup_contract(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    client.initialize(&admin);
+
+    let commitment_id = String::from_str(&e, "test_commitment_normal_length_123");
+    let token_id = client.mint(
+        &owner,
+        &commitment_id,
+        &30,
+        &10,
+        &String::from_str(&e, "safe"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+
+    // Verify the commitment_id is stored and retrieved correctly
+    let metadata = client.get_metadata(&token_id);
+    assert_eq!(metadata.metadata.commitment_id, commitment_id);
+}
+
+/// Issue #139: Test retrieval operations with long commitment_id
+/// Ensures no panic in get_metadata or get_nfts_by_owner even with longer strings
+#[test]
+fn test_get_metadata_with_long_commitment_id() {
+    let e = Env::default();
+    let (admin, client) = setup_contract(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    client.initialize(&admin);
+
+    // Create a reasonably long commitment_id (200 chars, within MAX_COMMITMENT_ID_LENGTH of 256)
+    let long_id_str = "z".repeat(200);
+    let long_id = String::from_str(&e, &long_id_str);
+
+    // Mint with long commitment_id
+    let token_id = client.mint(
+        &owner,
+        &long_id,
+        &30,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+
+    // Retrieve metadata - should not panic
+    let metadata = client.get_metadata(&token_id);
+    assert_eq!(metadata.metadata.commitment_id, long_id);
+
+    // Retrieve all metadata - should not panic
+    let all_nfts = client.get_all_metadata();
+    assert_eq!(all_nfts.len(), 1);
+    assert_eq!(all_nfts.get(0).unwrap().metadata.commitment_id, long_id);
+
+    // Retrieve by owner - should not panic
+    let owner_nfts = client.get_nfts_by_owner(&owner);
+    assert_eq!(owner_nfts.len(), 1);
+    assert_eq!(owner_nfts.get(0).unwrap().metadata.commitment_id, long_id);
+}
+
 // ============================================
 // get_metadata Tests
 // ============================================
@@ -665,6 +889,15 @@ fn test_get_all_metadata_empty() {
 }
 
 #[test]
+fn test_get_all_metadata_not_initialized_returns_empty() {
+    let e = Env::default();
+    let (_admin, client) = setup_contract(&e);
+
+    let all_nfts = client.get_all_metadata();
+    assert_eq!(all_nfts.len(), 0);
+}
+
+#[test]
 fn test_get_all_metadata() {
     let e = Env::default();
     let (admin, client) = setup_contract(&e);
@@ -707,6 +940,16 @@ fn test_get_nfts_by_owner_empty() {
     let owner = Address::generate(&e);
 
     client.initialize(&admin);
+
+    let nfts = client.get_nfts_by_owner(&owner);
+    assert_eq!(nfts.len(), 0);
+}
+
+#[test]
+fn test_get_nfts_by_owner_not_initialized_returns_empty() {
+    let e = Env::default();
+    let (_admin, client) = setup_contract(&e);
+    let owner = Address::generate(&e);
 
     let nfts = client.get_nfts_by_owner(&owner);
     assert_eq!(nfts.len(), 0);
@@ -947,12 +1190,16 @@ fn test_transfer_locked_nft() {
     // Verify NFT is active
     assert_eq!(client.is_active(&token_id), true);
 
-    // Transfer active NFT (now allowed for secondary market)
-    client.transfer(&owner, &recipient, &token_id);
+    // Transfer of active (locked) NFT must fail (#145)
+    let result = client.try_transfer(&owner, &recipient, &token_id);
+    assert!(
+        result.is_err(),
+        "transfer of active (locked) NFT must return error"
+    );
 
-    // Verify ownership changed
-    assert_eq!(client.owner_of(&token_id), recipient);
-    assert_eq!(client.is_active(&token_id), true); // Still active after transfer
+    // Ownership unchanged
+    assert_eq!(client.owner_of(&token_id), owner);
+    assert_eq!(client.is_active(&token_id), true);
 }
 
 #[test]
@@ -1671,6 +1918,23 @@ fn test_get_admin_not_initialized() {
     client.get_admin();
 }
 
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")] // NotInitialized
+fn test_get_core_contract_not_initialized() {
+    let e = Env::default();
+    let (_admin, client) = setup_contract(&e);
+
+    client.get_core_contract();
+}
+
+#[test]
+fn test_get_version_not_initialized_returns_zero() {
+    let e = Env::default();
+    let (_admin, client) = setup_contract(&e);
+
+    assert_eq!(client.get_version(), 0);
+}
+
 // ============================================
 // Validation Tests - Issue #103
 // ============================================
@@ -2326,4 +2590,171 @@ fn test_invariant_transfer_chain_preserves_supply() {
     assert_balance_supply_invariant(&client, &owners);
     assert_eq!(client.balance_of(&c), 0);
     assert_eq!(client.balance_of(&d), 1);
+}
+
+// ============================================
+// Multiple NFTs Per Owner Tests
+// ============================================
+
+#[test]
+fn test_owner_multiple_nfts_balance() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let (_admin, client, _core_id) = setup_contract_with_core(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    // Mint 3 NFTs to the same owner
+    let _token1 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_001"),
+        &30,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+
+    let _token2 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_002"),
+        &30,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &2000,
+        &asset_address,
+        &5,
+    );
+
+    let _token3 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_003"),
+        &30,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &3000,
+        &asset_address,
+        &5,
+    );
+
+    // Verify balance_of returns 3
+    assert_eq!(client.balance_of(&owner), 3);
+    assert_eq!(client.total_supply(), 3);
+}
+
+#[test]
+fn test_owner_multiple_nfts_owner_of_each() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let (_admin, client, _core_id) = setup_contract_with_core(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    // Mint 3 NFTs to the same owner
+    let token1 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_001"),
+        &30,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+
+    let token2 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_002"),
+        &30,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &2000,
+        &asset_address,
+        &5,
+    );
+
+    let token3 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_003"),
+        &30,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &3000,
+        &asset_address,
+        &5,
+    );
+
+    // Verify owner_of for each token_id returns correct owner
+    assert_eq!(client.try_owner_of(&token1).unwrap().unwrap(), owner);
+    assert_eq!(client.try_owner_of(&token2).unwrap().unwrap(), owner);
+    assert_eq!(client.try_owner_of(&token3).unwrap().unwrap(), owner);
+}
+
+#[test]
+fn test_owner_multiple_nfts_settle_one() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let (_admin, client, _core_id) = setup_contract_with_core(&e);
+    let owner = Address::generate(&e);
+    let asset_address = Address::generate(&e);
+
+    // Mint 3 NFTs with 1-day duration
+    let token1 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_001"),
+        &1,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &1000,
+        &asset_address,
+        &5,
+    );
+
+    let token2 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_002"),
+        &1,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &2000,
+        &asset_address,
+        &5,
+    );
+
+    let token3 = client.mint(
+        &owner,
+        &String::from_str(&e, "commitment_003"),
+        &1,
+        &10,
+        &String::from_str(&e, "balanced"),
+        &3000,
+        &asset_address,
+        &5,
+    );
+
+    // Advance time past expiration
+    e.ledger().with_mut(|li| li.timestamp = li.timestamp + 86401);
+
+    // Settle one NFT
+    client.settle(&token2);
+
+    // Verify balance_of still returns 3 (settled NFTs remain in balance)
+    assert_eq!(client.balance_of(&owner), 3);
+
+    // Verify owner_of still works for all tokens
+    assert_eq!(client.try_owner_of(&token1).unwrap().unwrap(), owner);
+    assert_eq!(client.try_owner_of(&token2).unwrap().unwrap(), owner);
+    assert_eq!(client.try_owner_of(&token3).unwrap().unwrap(), owner);
+
+    // Verify settled NFT is no longer active
+    let nft2 = client.try_get_metadata(&token2).unwrap().unwrap();
+    assert_eq!(nft2.is_active, false);
+
+    // Verify other NFTs remain active
+    let nft1 = client.try_get_metadata(&token1).unwrap().unwrap();
+    assert_eq!(nft1.is_active, true);
+
+    let nft3 = client.try_get_metadata(&token3).unwrap().unwrap();
+    assert_eq!(nft3.is_active, true);
 }
