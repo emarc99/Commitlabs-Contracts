@@ -127,6 +127,7 @@ fn test_attest_succeeds_after_commitment_created() {
         commitment_type: String::from_str(&env, "balanced"),
         early_exit_penalty: 10,
         min_fee_threshold: 1000,
+            grace_period_days: 0,
         grace_period_days: 1,
     };
 

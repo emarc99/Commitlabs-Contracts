@@ -708,6 +708,64 @@ impl CommitmentNFTContract {
     // Settlement (Issue #5 - Main Implementation)
     // ========================================================================
 
+    /// Mark NFT as inactive (for early exit or other non-expiry scenarios)
+    ///
+    /// # Reentrancy Protection
+    /// Uses checks-effects-interactions pattern.
+    pub fn mark_inactive(e: Env, token_id: u32) -> Result<(), ContractError> {
+        // Reentrancy protection
+        let guard: bool = e
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyGuard)
+            .unwrap_or(false);
+
+        if guard {
+            return Err(ContractError::ReentrancyDetected);
+        }
+        e.storage().instance().set(&DataKey::ReentrancyGuard, &true);
+        EmergencyControl::require_not_emergency(&e);
+
+        // Check if contract is paused
+        Pausable::require_not_paused(&e);
+
+        // CHECKS: Get the NFT
+        let mut nft: CommitmentNFT = e
+            .storage()
+            .persistent()
+            .get(&DataKey::NFT(token_id))
+            .ok_or_else(|| {
+                e.storage()
+                    .instance()
+                    .set(&DataKey::ReentrancyGuard, &false);
+                ContractError::TokenNotFound
+            })?;
+
+        // Check if already inactive
+        if !nft.is_active {
+            e.storage()
+                .instance()
+                .set(&DataKey::ReentrancyGuard, &false);
+            return Err(ContractError::AlreadySettled);
+        }
+
+        // EFFECTS: Update state
+        // Mark as inactive
+        nft.is_active = false;
+        e.storage().persistent().set(&DataKey::NFT(token_id), &nft);
+
+        // Clear reentrancy guard
+        e.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &false);
+
+        // Emit event
+        e.events()
+            .publish((symbol_short!("Inactive"), token_id), e.ledger().timestamp());
+
+        Ok(())
+    }
+
     /// Mark NFT as settled (after maturity)
     ///
     /// # Reentrancy Protection
