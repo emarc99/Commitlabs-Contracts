@@ -1298,41 +1298,10 @@ fn test_settle() {
 
 /// Mint with duration that would cause expires_at to overflow u64 (Issue #118).
 #[test]
-fn test_settle_not_expired_by_core() {
-    let e = Env::default();
-    let (_admin, client, _core_id) = setup_contract_with_core(&e);
-    let owner = Address::generate(&e);
-    let asset_address = Address::generate(&e);
-
-    e.ledger().with_mut(|li| {
-        li.timestamp = u64::MAX - 50_000;
-    });
-
-    let _ = client.mint(
-        &owner,
-        &String::from_str(&e, "overflow_commitment"),
-        &1,
-        &10,
-        &String::from_str(&e, "safe"),
-        &1000,
-        &asset_address,
-        &5,
-    );
-
-    // Core contract can settle before expiration (for early exit)
-    e.as_contract(&core_id, || {
-        client.settle(&core_id, &token_id);
-    });
-    
-    // Verify NFT is now inactive
-    assert_eq!(client.is_active(&token_id), false);
-}
-
-#[test]
 #[should_panic(expected = "Error(Contract, #9)")] // NotExpired
 fn test_settle_not_expired() {
     let e = Env::default();
-    let (_admin, client, core_id) = setup_contract_with_core(&e);
+    let (_admin, client, _core_id) = setup_contract_with_core(&e);
     let owner = Address::generate(&e);
     let asset_address = Address::generate(&e);
 

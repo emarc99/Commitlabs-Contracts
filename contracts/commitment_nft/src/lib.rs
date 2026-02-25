@@ -750,16 +750,13 @@ impl CommitmentNFTContract {
             return Err(ContractError::AlreadySettled);
         }
 
-        // Only verify expiration if caller is admin (not core contract)
-        // Core contract handles its own business logic for early exit vs normal settlement
-        if caller == admin {
-            let current_time = e.ledger().timestamp();
-            if current_time < nft.metadata.expires_at {
-                e.storage()
-                    .instance()
-                    .set(&DataKey::ReentrancyGuard, &false);
-                return Err(ContractError::NotExpired);
-            }
+        // Verify expiration
+        let current_time = e.ledger().timestamp();
+        if current_time < nft.metadata.expires_at {
+            e.storage()
+                .instance()
+                .set(&DataKey::ReentrancyGuard, &false);
+            return Err(ContractError::NotExpired);
         }
 
         // EFFECTS: Update state
